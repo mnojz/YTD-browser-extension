@@ -1,0 +1,48 @@
+// Builds the ytd: request for the page the user is watching.
+//
+// This lives in its own file because content.js is an IIFE that cannot be
+// imported by `node --test`; keeping the URL construction separate makes it
+// unit testable, which is where the fragment bug described below was caught.
+(function (root) {
+  "use strict";
+
+  // Returns the page URL with the mod's `format` parameter set in the query
+  // string, leaving every other parameter (including `list`) untouched.
+  //
+  // This must not be done by string concatenation. Appending `&format=...` to a
+  // URL that has a "#fragment" puts the parameter inside the fragment, where the
+  // bridge cannot see it: the format silently fell back to 1080p and the stray
+  // `format=` was forwarded to yt-dlp as part of the media URL. The same
+  // concatenation on a URL with no query string produced
+  // "https://youtu.be/ID&format=FHD", which the bridge read as part of the path
+  // and rejected outright.
+  function withFormat(pageUrl, commonFormat) {
+    const raw = String(pageUrl === undefined || pageUrl === null ? "" : pageUrl);
+    const format = String(commonFormat || "FHD");
+    let parsed;
+    try {
+      parsed = new URL(raw);
+    } catch (error) {
+      // Not an absolute URL; hand it back untouched and let the bridge report it.
+      return raw;
+    }
+    // set() replaces any existing value instead of appending a second one.
+    parsed.searchParams.set("format", format);
+    // The bridge drops the list parameter unless the request asks for playlist
+    // scope, so without this a video opened from a playlist would always be
+    // downloaded on its own. Asking for playlist scope whenever the page
+    // carries a non-empty list parameter keeps the whole playlist reachable
+    // from the button, with no extra popup control.
+    const list = String(parsed.searchParams.get("list") || "");
+    if (list !== "")
+      parsed.searchParams.set("playlist", "1");
+    return parsed.toString();
+  }
+
+  // Full URI handed to the x-scheme-handler/ytd desktop entry.
+  function buildRequest(pageUrl, commonFormat) {
+    return "ytd:" + withFormat(pageUrl, commonFormat);
+  }
+
+  root.YtdExtensionUrl = { withFormat: withFormat, buildRequest: buildRequest };
+})(typeof globalThis !== "undefined" ? globalThis : this);

@@ -1,0 +1,360 @@
+#popup-bg {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background-color: rgb(0, 0, 0, 0.4);
+  z-index: 99998;
+}
+
+#popup-box {
+  /* height: 200px; */
+  height: auto;
+  width: 300px;
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  border-radius: 8px;
+  padding: 25px;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-evenly;
+  z-index: 99999;
+}
+
+html[darky] #popup-box {
+  background-color: #212121;
+}
+
+html[lighty] #popup-box {
+  background-color: #fff;
+}
+
+#popup-header {
+  display: flex;
+  align-items: center;
+}
+
+#popup-icon {
+  height: 30px;
+  width: 50px;
+  margin-right: 8px;
+  background-repeat: no-repeat;
+  background-position: center;
+}
+
+#popup-title {
+  font-family: "Roboto", "Arial", sans-serif;
+  font-weight: 500;
+  font-size: 18px;
+}
+
+html[darky] #popup-title {
+  color: #f1f1f1;
+}
+
+html[lighty] #popup-title {
+  color: #0f0f0f;
+}
+
+#popup-format-selection {
+  /* height: 150px; */
+  height: auto;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: space-evenly;
+  margin: 25px 0;
+  padding: 10px 0;
+}
+
+html[darky] #popup-format-selection {
+  border-top: solid 2px #2e2e2e;
+  border-bottom: solid 2px #2e2e2e;
+}
+
+html[lighty] #popup-format-selection {
+  border-top: solid 2px #ccc;
+  border-bottom: solid 2px #ccc;
+}
+
+.popup-format-box {
+  display: flex;
+  align-items: center;
+  width: 230px;
+  height: 30px;
+  border-radius: 8px;
+  padding: 8px 12px;
+}
+
+html[darky] .popup-format-box:hover {
+  background-color: #2e2e2e;
+}
+
+html[lighty] .popup-format-box:hover {
+  background-color: #e0e0e0;
+}
+
+/* format selection list */
+
+.popup-format-box input {
+  margin: 0 8px 0 0;
+  appearance: none;
+  -webkit-appearance: none;
+  height: 20px;
+  width: 20px;
+  border-radius: 50%;
+  cursor: pointer;
+  position: relative;
+  transition:
+    border-color 0.2s ease,
+    transform 0.1s ease;
+}
+
+html[darky] .popup-format-box input {
+  border: 2px solid #ffffff1a;
+}
+
+html[lighty] .popup-format-box input {
+  border: 2px solid #00000033;
+}
+
+.popup-format-box input:hover {
+  filter: brightness(1.2);
+}
+
+.popup-format-box input:active {
+  transform: scale(0.9);
+}
+
+html[darky] .popup-format-box input:checked {
+  border-color: #3ea6ff;
+  box-shadow: 0 0 6px #1e609b66;
+}
+
+html[lighty] .popup-format-box input:checked {
+  border-color: #065fd4;
+  box-shadow: 0 0 6px #2f92e966;
+}
+
+.popup-format-box input::after {
+  content: "";
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  height: 12px;
+  width: 12px;
+  border-radius: 50%;
+  transform: translate(-50%, -50%) scale(0);
+  transition: transform 0.2s ease;
+}
+
+html[darky] .popup-format-box input::after {
+  background: #3ea6ff;
+}
+html[lighty] .popup-format-box input::after {
+  background: #065fd4;
+}
+
+.popup-format-box input:checked::after {
+  transform: translate(-50%, -50%) scale(1);
+}
+
+/* format selection list */
+
+.popup-format-box label,
+.popup-format-box span {
+  font-family: "Roboto", "Arial", sans-serif;
+  font-weight: 400;
+  font-size: 16px;
+}
+
+html[darky] .popup-format-box span,
+html[darky] .popup-format-box label {
+  color: #f1f1f1;
+}
+
+html[lighty] .popup-format-box span,
+html[lighty] .popup-format-box label {
+  color: #0f0f0f;
+}
+
+.popup-format-box span {
+  margin-left: auto;
+}
+
+#popup-download-button {
+  height: 40px;
+  width: 150px;
+  border-radius: 20px;
+  font-family: "Roboto", "Arial", sans-serif;
+  font-weight: 500;
+  font-size: 16px;
+  border: none;
+  cursor: pointer;
+  align-self: center;
+}
+
+html[darky] #popup-download-button {
+  background: #3ea6ff;
+  color: #212121;
+  &:hover {
+    background: #59b1ff;
+  }
+}
+
+html[lighty] #popup-download-button {
+  background: #065fd4;
+  color: #ffffff;
+  &:hover {
+    background: #0556bf;
+  }
+}
+
+#popup-close-button {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  height: 40px;
+  width: 40px;
+  cursor: pointer;
+  background-size: 25px 25px;
+  background-repeat: no-repeat;
+  background-position: center;
+  display: inline-block;
+  border-radius: 50%;
+  border: none;
+}
+
+/* Dark theme */
+html[darky] #popup-close-button {
+  background-color: #212121;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24'%3E%3Cpath d='m16.192 6.344-4.243 4.242-4.242-4.242-1.414 1.414L10.535 12l-4.242 4.242 1.414 1.414 4.242-4.242 4.243 4.242 1.414-1.414L13.364 12l4.242-4.242z' fill='%23ffffff35'/%3E%3C/svg%3E");
+}
+
+html[darky] #popup-close-button:hover {
+  filter: brightness(1.5);
+}
+
+/* Light theme */
+html[lighty] #popup-close-button {
+  background-color: #ffffff;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24'%3E%3Cpath d='m16.192 6.344-4.243 4.242-4.242-4.242-1.414 1.414L10.535 12l-4.242 4.242 1.414 1.414 4.242-4.242 4.243 4.242 1.414-1.414L13.364 12l4.242-4.242z' fill='%2300000050'/%3E%3C/svg%3E");
+}
+
+html[lighty] #popup-close-button:hover {
+  filter: brightness(0.75);
+}
+
+/* custom download button
+ *
+ * Styled to sit alongside YouTube's own action buttons rather than to stand
+ * out. YouTube's current buttons are not a flat fill: they carry a faint
+ * vertical gradient, a hairline highlight along the top edge, and a soft
+ * contact shadow. The values below follow YouTube's yt-spec tokens
+ * (--yt-spec-10-percent-layer and friends) for both themes.
+ *
+ * The custom arrow glyph is the project logo and is kept as-is.
+ */
+
+.ambxst-ytd-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  /* Fallback geometry. content.js measures a neighbouring YouTube button and
+   * overrides these inline, so the button keeps matching YouTube when its own
+   * metrics change. */
+  height: 36px;
+  margin: 0 4px;
+  padding: 0 16px;
+  border: none;
+  border-radius: 18px;
+  box-sizing: border-box;
+  flex: 0 0 auto;
+  font-family: "Roboto", "Arial", sans-serif;
+  font-size: 14px;
+  font-weight: 500;
+  line-height: 20px;
+  letter-spacing: 0.2px;
+  cursor: pointer;
+  white-space: nowrap;
+  vertical-align: top;
+  transition:
+    background-color 0.15s ease,
+    box-shadow 0.15s ease,
+    opacity 0.15s ease;
+}
+
+/* The project mark inherits the label colour so it follows the theme. */
+.ambxst-ytd-button svg {
+  flex: none;
+  width: auto;
+  height: var(--ambxst-glyph-height, 16px);
+}
+
+/* Dark theme: a light 10% layer, a top highlight, and a darker base so the
+ * button reads as slightly raised. */
+html[darky] .ambxst-ytd-button {
+  color: #f1f1f1;
+  background-color: rgba(255, 255, 255, 0.1);
+  background-image: linear-gradient(
+    to bottom,
+    rgba(255, 255, 255, 0.06),
+    rgba(255, 255, 255, 0) 60%
+  );
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.14),
+    0 1px 2px rgba(0, 0, 0, 0.2);
+}
+
+html[darky] .ambxst-ytd-button:hover {
+  background-color: rgba(255, 255, 255, 0.16);
+}
+
+html[darky] .ambxst-ytd-button:active {
+  background-color: rgba(255, 255, 255, 0.2);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.1);
+}
+
+/* Light theme: the page behind the button is white, so a white hairline leaves
+ * the top edge invisible and the button appears to fade into the background.
+ * The cue has to go the other way here: a slightly darker top edge, mirroring
+ * the dark theme's highlight in the opposite direction. */
+html[lighty] .ambxst-ytd-button {
+  color: #0f0f0f;
+  background-color: rgba(0, 0, 0, 0.05);
+  background-image: linear-gradient(
+    to bottom,
+    rgba(0, 0, 0, 0.02),
+    rgba(0, 0, 0, 0) 60%
+  );
+  box-shadow:
+    inset 0 1px 0 rgba(0, 0, 0, 0.08),
+    0 1px 2px rgba(0, 0, 0, 0.08);
+}
+
+html[lighty] .ambxst-ytd-button:hover {
+  background-color: rgba(0, 0, 0, 0.1);
+}
+
+html[lighty] .ambxst-ytd-button:active {
+  background-color: rgba(0, 0, 0, 0.14);
+  /* Pressed state flattens the edge, the same way the dark theme softens it. */
+  box-shadow: inset 0 1px 0 rgba(0, 0, 0, 0.04);
+}
+
+.ambxst-ytd-button:focus-visible {
+  outline: 2px solid #3ea6ff;
+  outline-offset: 2px;
+}
+
+/* YouTube's own download button is hidden here rather than with an inline
+ * style, because YouTube re-renders its action row and would drop that. The
+ * rule only applies once our button is actually on the page, so a failure to
+ * inject leaves the original download button usable. */
+html.ambxst-ytd-ready #flexible-item-buttons ytd-download-button-renderer {
+  display: none !important;
+}
+
