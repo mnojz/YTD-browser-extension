@@ -1,4 +1,4 @@
-#popup-bg {
+#ambxst-ytd-popup-bg {
   position: fixed;
   top: 0;
   left: 0;
@@ -8,7 +8,7 @@
   z-index: 99998;
 }
 
-#popup-box {
+#ambxst-ytd-popup-box {
   /* height: 200px; */
   height: auto;
   width: 300px;
@@ -24,42 +24,59 @@
   z-index: 99999;
 }
 
-html[darky] #popup-box {
+html[darky] #ambxst-ytd-popup-box {
   background-color: #212121;
 }
 
-html[lighty] #popup-box {
+html[lighty] #ambxst-ytd-popup-box {
   background-color: #fff;
 }
 
-#popup-header {
+#ambxst-ytd-popup-header {
   display: flex;
   align-items: center;
 }
 
-#popup-icon {
+/* The project mark, same glyph as the button, injected as an inline svg so it
+ * takes its colour from the theme instead of from an encoded background image
+ * that would need one copy per theme. */
+#ambxst-ytd-popup-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
   height: 30px;
-  width: 50px;
+  width: 30px;
   margin-right: 8px;
-  background-repeat: no-repeat;
-  background-position: center;
 }
 
-#popup-title {
+#ambxst-ytd-popup-icon svg {
+  width: 100%;
+  height: 100%;
+}
+
+html[darky] #ambxst-ytd-popup-icon {
+  color: #f1f1f1;
+}
+
+html[lighty] #ambxst-ytd-popup-icon {
+  color: #0f0f0f;
+}
+
+#ambxst-ytd-popup-title {
   font-family: "Roboto", "Arial", sans-serif;
   font-weight: 500;
   font-size: 18px;
 }
 
-html[darky] #popup-title {
+html[darky] #ambxst-ytd-popup-title {
   color: #f1f1f1;
 }
 
-html[lighty] #popup-title {
+html[lighty] #ambxst-ytd-popup-title {
   color: #0f0f0f;
 }
 
-#popup-format-selection {
+#ambxst-ytd-popup-format-selection {
   /* height: 150px; */
   height: auto;
   display: flex;
@@ -70,12 +87,12 @@ html[lighty] #popup-title {
   padding: 10px 0;
 }
 
-html[darky] #popup-format-selection {
+html[darky] #ambxst-ytd-popup-format-selection {
   border-top: solid 2px #2e2e2e;
   border-bottom: solid 2px #2e2e2e;
 }
 
-html[lighty] #popup-format-selection {
+html[lighty] #ambxst-ytd-popup-format-selection {
   border-top: solid 2px #ccc;
   border-bottom: solid 2px #ccc;
 }
@@ -129,37 +146,27 @@ html[lighty] .popup-format-box input {
   transform: scale(0.9);
 }
 
+/* The dot of a selected radio is painted with background-image, not with
+ * ::after. Browsers do not generate pseudo-elements on <input>: it is a
+ * replaced element, so the old `input::after` rule never rendered anything and
+ * the selected option only showed a coloured ring. A radial gradient honours
+ * `appearance: none` and paints in every engine. */
 html[darky] .popup-format-box input:checked {
   border-color: #3ea6ff;
-  box-shadow: 0 0 6px #1e609b66;
+  background-image: radial-gradient(
+    circle at center,
+    #3ea6ff 0 4px,
+    transparent 4.5px
+  );
 }
 
 html[lighty] .popup-format-box input:checked {
   border-color: #065fd4;
-  box-shadow: 0 0 6px #2f92e966;
-}
-
-.popup-format-box input::after {
-  content: "";
-  position: absolute;
-  top: 50%;
-  left: 50%;
-  height: 12px;
-  width: 12px;
-  border-radius: 50%;
-  transform: translate(-50%, -50%) scale(0);
-  transition: transform 0.2s ease;
-}
-
-html[darky] .popup-format-box input::after {
-  background: #3ea6ff;
-}
-html[lighty] .popup-format-box input::after {
-  background: #065fd4;
-}
-
-.popup-format-box input:checked::after {
-  transform: translate(-50%, -50%) scale(1);
+  background-image: radial-gradient(
+    circle at center,
+    #065fd4 0 4px,
+    transparent 4.5px
+  );
 }
 
 /* format selection list */
@@ -185,7 +192,7 @@ html[lighty] .popup-format-box label {
   margin-left: auto;
 }
 
-#popup-download-button {
+#ambxst-ytd-popup-download-button {
   height: 40px;
   width: 150px;
   border-radius: 20px;
@@ -197,23 +204,29 @@ html[lighty] .popup-format-box label {
   align-self: center;
 }
 
-html[darky] #popup-download-button {
+/* The hover rules are written out flat rather than nested inside the rule they
+ * belong to: nesting inside a selector list is the newest part of the CSS
+ * syntax, and the part a content sheet is most likely to meet an engine that
+ * cannot parse it. */
+html[darky] #ambxst-ytd-popup-download-button {
   background: #3ea6ff;
   color: #212121;
-  &:hover {
-    background: #59b1ff;
-  }
 }
 
-html[lighty] #popup-download-button {
+html[darky] #ambxst-ytd-popup-download-button:hover {
+  background: #59b1ff;
+}
+
+html[lighty] #ambxst-ytd-popup-download-button {
   background: #065fd4;
   color: #ffffff;
-  &:hover {
-    background: #0556bf;
-  }
 }
 
-#popup-close-button {
+html[lighty] #ambxst-ytd-popup-download-button:hover {
+  background: #0556bf;
+}
+
+#ambxst-ytd-popup-close-button {
   position: absolute;
   top: 8px;
   right: 8px;
@@ -229,22 +242,22 @@ html[lighty] #popup-download-button {
 }
 
 /* Dark theme */
-html[darky] #popup-close-button {
+html[darky] #ambxst-ytd-popup-close-button {
   background-color: #212121;
   background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24'%3E%3Cpath d='m16.192 6.344-4.243 4.242-4.242-4.242-1.414 1.414L10.535 12l-4.242 4.242 1.414 1.414 4.242-4.242 4.243 4.242 1.414-1.414L13.364 12l4.242-4.242z' fill='%23ffffff35'/%3E%3C/svg%3E");
 }
 
-html[darky] #popup-close-button:hover {
+html[darky] #ambxst-ytd-popup-close-button:hover {
   filter: brightness(1.5);
 }
 
 /* Light theme */
-html[lighty] #popup-close-button {
+html[lighty] #ambxst-ytd-popup-close-button {
   background-color: #ffffff;
   background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24'%3E%3Cpath d='m16.192 6.344-4.243 4.242-4.242-4.242-1.414 1.414L10.535 12l-4.242 4.242 1.414 1.414 4.242-4.242 4.243 4.242 1.414-1.414L13.364 12l4.242-4.242z' fill='%2300000050'/%3E%3C/svg%3E");
 }
 
-html[lighty] #popup-close-button:hover {
+html[lighty] #ambxst-ytd-popup-close-button:hover {
   filter: brightness(0.75);
 }
 
