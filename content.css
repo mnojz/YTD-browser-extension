@@ -369,50 +369,86 @@ html[lighty] .ambxst-ytd-button--pill:active {
   box-shadow: inset 0 1px 0 rgba(0, 0, 0, 0.04);
 }
 
-/* Shorts: the round action button with its label underneath, matching the
- * like / dislike / comments / share column it sits in. The circle is the mark's
- * own box -- content-box padding with a 50% radius -- so the markup stays
- * identical to the other variants and no wrapper element is needed. The colours
- * are deliberately not theme-dependent: this column sits over the video, and
- * YouTube keeps its own Shorts labels white on both themes. */
-.ambxst-ytd-button--reel {
+/* Shorts, fallback: when the chip could not be copied from the neighbouring
+ * button, this hand-rolled version stands in -- a circular chip with the label
+ * underneath. It is scoped away from .--native, where YouTube's own classes do
+ * the work and these rules would only fight them. The colours are deliberately
+ * not theme-dependent: this column sits over the video, and YouTube keeps its
+ * own Shorts labels white on both themes. */
+.ambxst-ytd-button--reel:not(.ambxst-ytd-button--native) {
   flex-direction: column;
   gap: 6px;
   margin: 6px 0;
   padding: 0;
   background: none;
-  color: #fff;
   font-size: 12px;
   font-weight: 500;
 }
 
-.ambxst-ytd-button--reel svg {
-  width: 24px;
-  height: 24px;
-  padding: 12px;
-  box-sizing: content-box;
+/* The mark's colour is ours whatever the box is borrowed. A <button> does not
+ * take its colour from the page -- the UA hands it buttontext, which is black --
+ * and the chip classes copied from a neighbour switch the :not(--native) rules
+ * off, which left the mark painting black onto the dark bar. */
+.ambxst-ytd-button--reel {
+  color: #fff;
+}
+
+.ambxst-ytd-button--reel:not(.ambxst-ytd-button--native) svg {
+  /* The chip is a square with the mark centred inside it, never the mark's own
+   * shape plus padding: this mark is 11:16, so a box built from its width came
+   * out 40px across and 48px tall and the circle rendered as an ellipse. Both
+   * sizes are measured from the button next door (content.js sets them), and the
+   * padding that centres the mark in between is the difference of the two. */
+  box-sizing: border-box;
+  width: var(--ambxst-chip-size, 48px);
+  height: var(--ambxst-chip-size, 48px);
+  padding: calc(
+    (var(--ambxst-chip-size, 48px) - var(--ambxst-glyph-height, 24px)) / 2
+  );
   border-radius: 50%;
-  background-color: rgba(255, 255, 255, 0.15);
+  /* The current Shorts buttons are not a flat fill: a faint vertical gradient
+   * over a light layer, with a hairline highlight along the top edge. The flat
+   * fill is what made this read as the older UI. */
+  /* Kept faint on purpose. Laid over the fill below, a stronger gradient made
+   * this circle read lighter than the ones around it, which is its own kind of
+   * mismatch: the neighbours are a hair lighter at the top edge, not a shade
+   * lighter all over. */
+  background-color: rgba(255, 255, 255, 0.14);
+  background-image: linear-gradient(
+    to bottom,
+    rgba(255, 255, 255, 0.09),
+    rgba(255, 255, 255, 0) 65%
+  );
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.18);
 }
 
-.ambxst-ytd-button--reel:hover svg {
-  background-color: rgba(255, 255, 255, 0.28);
+.ambxst-ytd-button--reel:not(.ambxst-ytd-button--native):hover svg {
+  background-color: rgba(255, 255, 255, 0.26);
 }
 
-.ambxst-ytd-button--reel:active svg {
+.ambxst-ytd-button--reel:not(.ambxst-ytd-button--native):active svg {
   background-color: rgba(255, 255, 255, 0.2);
 }
 
-.ambxst-ytd-button--reel .ambxst-ytd-button-label {
+.ambxst-ytd-button--reel:not(.ambxst-ytd-button--native) .ambxst-ytd-button-label {
+  /* Stated here rather than inherited: this column styles its own children, and
+   * a label that picks up the column's text size comes out far too large for the
+   * chip above it. */
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1.3;
   /* The same shadow YouTube puts under its own Shorts labels, so a bright frame
    * of video cannot wash the text out. */
   text-shadow: 0 1px 2px rgba(0, 0, 0, 0.6);
 }
 
-/* YT Music: an icon-only button in the player bar, sized and coloured like the
- * like/dislike pair it sits beside. The label is hidden rather than left out, so
+/* YT Music, fallback: when the chip could not be copied from the like/dislike
+ * button next door, this hand-rolled version stands in. It is scoped away from
+ * .--native, where the neighbour's own classes set the box: a hardcoded 40px here
+ * was a couple of pixels larger than the buttons beside it and, centred in the
+ * row, read as sitting above them. The label is hidden rather than left out, so
  * the markup stays identical across variants and the tooltip still has text. */
-.ambxst-ytd-button--ytmusic {
+.ambxst-ytd-button--ytmusic:not(.ambxst-ytd-button--native) {
   justify-content: center;
   width: 40px;
   height: 40px;
@@ -422,8 +458,17 @@ html[lighty] .ambxst-ytd-button--pill:active {
   background-color: transparent;
 }
 
+/* The mark in the bar, a fifth smaller than the icons beside it. Those are
+ * square and this glyph is 11:16, so at their height it fills more of the circle
+ * than they do and reads as a heavier mark than a chip of the same size. The box
+ * around it is measured (content.js) -- this is the mark alone, and the one size
+ * here declared rather than read, because it is a judgement about our own glyph
+ * and not about the row. Not scoped to the un-inherited button: when the chip's
+ * classes are on it, they are what would size the icon, and this has to win.
+ * content.css is injected after YouTube's own stylesheets, so on equal
+ * specificity this is the later rule. */
 .ambxst-ytd-button--ytmusic svg {
-  width: 20px;
+  width: auto;
   height: 20px;
 }
 
@@ -431,11 +476,27 @@ html[lighty] .ambxst-ytd-button--pill:active {
   display: none;
 }
 
+/* The other source of a baseline. A box in an inline row is placed by its
+ * baseline, and an inline-block's baseline is its last line box: with the label
+ * at display:none there is no line box at all, so the button sits on its bottom
+ * edge while the chips around it -- whose own text is hidden but still in flow --
+ * sit on a text baseline a few pixels higher up. This puts a line box back
+ * without showing it: in flow, zero height, clipped, so the box is no bigger and
+ * nothing is drawn. content.js turns it on only when measuring says it is what
+ * leaves the button level beside its neighbours, and off again when it is not. */
+.ambxst-ytd-button--label-baseline .ambxst-ytd-button-label {
+  display: block;
+  height: 0;
+  overflow: hidden;
+  font-size: 12px;
+  line-height: normal;
+}
+
 html[darky] .ambxst-ytd-button--ytmusic {
   color: #fff;
 }
 
-html[darky] .ambxst-ytd-button--ytmusic:hover {
+html[darky] .ambxst-ytd-button--ytmusic:not(.ambxst-ytd-button--native):hover {
   background-color: rgba(255, 255, 255, 0.1);
 }
 
@@ -443,7 +504,7 @@ html[lighty] .ambxst-ytd-button--ytmusic {
   color: #030303;
 }
 
-html[lighty] .ambxst-ytd-button--ytmusic:hover {
+html[lighty] .ambxst-ytd-button--ytmusic:not(.ambxst-ytd-button--native):hover {
   background-color: rgba(0, 0, 0, 0.05);
 }
 

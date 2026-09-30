@@ -32,6 +32,26 @@
   // Bounds for a neighbouring button height worth copying. Anything outside is
   // a collapsed or unrendered node rather than a real button.
   const MIN_BUTTON_HEIGHT = 28;
+  // The most a button may be shifted to sit level with its neighbour. Measured
+  // in a real row the difference is single digit: a handful of pixels of
+  // descender between a baseline and a vertical-align. Past this the button is
+  // not misaligned but misplaced, and adjusting it would paper over that.
+  const MAX_ALIGNMENT_SHIFT = 12;
+  // The inline-level displays a box can take in a row. A copied chip that is
+  // block-level would put our button on a line of its own, so that is the one
+  // case where the button's own display is imposed rather than adopted.
+  const INLINE_LEVEL_DISPLAYS = new Set([
+    "inline",
+    "inline-block",
+    "inline-flex",
+    "inline-grid",
+  ]);
+  // Which of the two sources of a baseline the button is given, chosen by
+  // measurement. See lineUpWith.
+  const LABEL_BASELINE_CLASS = "ambxst-ytd-button--label-baseline";
+  // The last thing the YT Music pass reported, so the console is told about a
+  // change rather than about every tick.
+  let lastMetricsReport = "";
   const MAX_BUTTON_HEIGHT = 64;
 
   const svgInnerHtml = `
@@ -110,8 +130,16 @@
   //   containers  candidate parents, best first
   //   anchors     candidates for the node the button follows, best first; an
   //               empty list appends to the end of the container
-  //   anchorText  last-resort match against a child's aria-label/text, for rows
-  //               built from anonymous custom elements that carry no ids
+  //   anchorPatterns  last-resort matches against an aria-label/text anywhere in
+  //               the container, for rows built from anonymous custom elements
+  //   chipFromAnchor  copy the neighbouring button's own classes and inner
+  //               wrappers, so the look comes from YouTube's stylesheet instead
+  //               of being reimplemented here
+  //   climbAnchor when an explicit anchor is nested inside a wrapper, insert
+  //               beside the wrapper instead of beside the nested element
+  //   anchorFrom  find the neighbour by what it says (a label or its text)
+  //               anywhere on the page, and take the row it lives in as the
+  //               container. For a surface whose row cannot be named in advance
   //   variant     suffix of the .ambxst-ytd-button--* class content.css styles
   //   label       text shown with the mark, and the tooltip where it is hidden
   //   hideOwn     whether YouTube's own download button should be hidden
@@ -173,8 +201,23 @@
       "#shorts-container #actions",
       "#actions",
     ],
+    // The column is rebuilt by every overlay YouTube renders and its wrapper has
+    // been renamed more than once, so it is not named here at all: the share
+    // button is, and the row is whatever contains it. My own guesses at that
+    // wrapper are what left this surface with no button at all.
+    anchorFrom: /^share$/i,
     anchors: ["#share-button", "[aria-label=Share]", "[aria-label^=Share]"],
-    anchorText: /share/i,
+    anchorPatterns: [/share/i],
+    // The chip is not copied here, only measured. YouTube's chip is an icon-only
+    // circle: a label placed inside it spills out of the circle and takes the
+    // chip's own text sizing, which is not what this column looks like. The
+    // look is ours (content.css, gradient and top highlight included) and the
+    // sizes come from the neighbour.
+    // Shorts rows are a wrapper element with the chip nested inside, so the
+    // button has to sit beside the wrapper. The YT Music like/dislike group is
+    // the opposite: the dislike shape is the neighbour, and sitting directly
+    // beside it is what puts the button between Dislike and what follows it.
+    climbAnchor: true,
     variant: "reel",
     label: "Download",
     // The column has no download button of its own, so there is nothing of
@@ -201,10 +244,15 @@
         !!document.querySelector("ytmusic-player-bar")
       );
     },
+    // The like/dislike pair lives beside the title in the middle of the bar, not
+    // in the right-hand group (volume, queue, overflow menu), so the element that
+    // holds it comes first: anchoring into #right-controls put the button at the
+    // end of the bar instead of next to Dislike.
     containers: [
-      "ytmusic-player-bar #right-controls",
-      "ytmusic-player-bar .right-controls-buttons",
       "ytmusic-player-bar ytmusic-like-button-renderer",
+      "ytmusic-player-bar .middle-controls-buttons",
+      "ytmusic-player-bar #middle-controls",
+      "ytmusic-player-bar #right-controls",
       "ytmusic-player-bar",
     ],
     anchors: [
@@ -212,6 +260,12 @@
       "ytmusic-like-button-renderer #button-shape-dislike",
       "ytmusic-like-button-renderer",
     ],
+    anchorPatterns: [/dislike/i],
+    // The bar's buttons are not reimplemented here either: a hardcoded 40px box
+    // sat a couple of pixels larger than its neighbours and, being centred in the
+    // row, read as sitting above them. Copying the chip makes the box, its
+    // margins, its icon size and its hover state the neighbour's own.
+    chipFromAnchor: true,
     variant: "ytmusic",
     label: "Download",
     hideOwn: false,
@@ -339,6 +393,16 @@
   // passes it. When YouTube hides the whole area the placement is right and the
   // button comes back with it.
   function placementIsValid(button, layout) {
+    if (layout.anchorFrom) {
+      const target = resolveTarget(layout);
+      // No neighbour on the page means there is nothing to sit beside, and the
+      // placement cannot be judged: the next check injects again.
+      if (!target) return false;
+      return (
+        target.container.contains(button) &&
+        (!target.anchor || button.previousElementSibling === target.anchor)
+      );
+    }
     let buttonInStaleContainer = false;
     let someContainerUsable = false;
     for (const selector of layout.containers) {
@@ -355,23 +419,124 @@
     return buttonInStaleContainer && !someContainerUsable;
   }
 
+  // The container's own child that holds a node. The button has to end up as a
+  // sibling of the row's other buttons: inserting next to a <button> that lives
+  // inside a wrapper element (which is how every one of these rows is built)
+  // would bury ours inside a neighbour's chip, where it inherits the wrong shape
+  // and gets clipped by it.
+  function rowChildOf(container, node) {
+    let current = node;
+    while (current.parentElement && current.parentElement !== container) {
+      current = current.parentElement;
+    }
+    return current;
+  }
+
+  // Finds an element by what it says it is, anywhere on the page. Used when a
+  // surface's row cannot be named in advance: the row is rebuilt constantly and
+  // its wrapper has been renamed, but the button it contains still says "Share".
+  //
+  // Preference, in order: on screen and on the right (which is where these
+  // columns live), on screen, matching at all. Off-screen matches are last
+  // because Shorts keeps the reels either side of the current one loaded, so a
+  // plain document-order search finds a neighbour's button first.
+  function findByLabel(pattern) {
+    let visible = null;
+    let fallback = null;
+    for (const node of document.querySelectorAll(
+      "[aria-label], [title], button, a, [role=button]"
+    )) {
+      // Each field on its own, so an anchored pattern like /^share$/i can
+      // actually match: testing it against the three concatenated with spaces
+      // meant it never could.
+      const fields = [
+        node.getAttribute("aria-label") || "",
+        node.getAttribute("title") || "",
+        node.textContent || "",
+      ];
+      if (!fields.some((field) => pattern.test(field))) continue;
+      const rect = node.getBoundingClientRect();
+      if (!rect.width || !rect.height) continue;
+      if (!isInViewport(node)) {
+        if (!fallback) fallback = node;
+        continue;
+      }
+      if (rect.left > (window.innerWidth || 0) * 0.5) return node;
+      if (!visible) visible = node;
+    }
+    return visible || fallback;
+  }
+
+  // The row an element belongs to: the nearest ancestor that holds a set of
+  // buttons rather than a single one. On Shorts the share button sits in a
+  // wrapper of its own, and inserting into that wrapper would put the button
+  // inside a chip with no room for it -- the row is one level further out.
+  function rowAround(node) {
+    // What makes a child one of the row's buttons. Both shapes these rows come in
+    // have to count: a real <button>, and a view-model wrapper that carries the
+    // label itself (aria-label="Like" on the wrapper, nothing nested inside it).
+    // Testing only whether a child *contains* a button scored a column of
+    // labelled wrappers as one instead of five, so the row was never recognised
+    // and the fallback buried our button inside its neighbour.
+    const isButtonish = (child) =>
+      child.tagName === "BUTTON" ||
+      child.getAttribute("role") === "button" ||
+      child.hasAttribute("aria-label") ||
+      !!child.querySelector("button, [role=button], [aria-label]");
+    for (let parent = node.parentElement; parent; parent = parent.parentElement) {
+      if (parent === document.body || parent === document.documentElement) break;
+      if (!isRendered(parent)) continue;
+      const buttonish = [...parent.children].filter(
+        (child) => child === node || isButtonish(child)
+      );
+      if (buttonish.length >= 2) return parent;
+    }
+    return node.parentElement;
+  }
+
+  // Where this layout's button goes: the container to inject into and the node to
+  // sit beside, or null when neither can be found yet.
+  function resolveTarget(layout) {
+    if (layout.anchorFrom) {
+      const node = findByLabel(layout.anchorFrom);
+      const container = node ? rowAround(node) : null;
+      if (container) return { container, anchor: rowChildOf(container, node) };
+    }
+    const container = findContainer(layout);
+    if (!container) return null;
+    return { container, anchor: findAnchor(container, layout) };
+  }
+
   // The node the button belongs beside, resolved *inside* the layout's
   // container so that an identical element elsewhere on the page -- another
   // reel's share button, a playlist row's dislike button -- cannot be picked up
-  // by mistake.
+  // by mistake, and climbed back to the container's own child so the insertion
+  // stays at the same level as the buttons it matches.
   function findAnchor(container, layout) {
+    // An explicit selector points at the exact neighbour the button belongs
+    // beside, and on surfaces where that neighbour lives inside a cluster
+    // (YT Music's like/dislike group) it is used as it is: inserting beside the
+    // wrapper instead would move the button past everything else in the group.
     for (const selector of layout.anchors || []) {
       const node = container.querySelector(selector);
-      if (node) return node;
+      if (!node || node === container) continue;
+      return layout.climbAnchor ? rowChildOf(container, node) : node;
     }
-    // Last resort: these rows are built from anonymous custom elements, so the
-    // only handle left is what the button says it is.
-    if (layout.anchorText) {
-      for (const child of container.children) {
-        const label = `${child.getAttribute("aria-label") || ""} ${
-          child.textContent || ""
+    // The id or the label is often one level deeper than the row, and sometimes
+    // inside a shadow root nothing here can see, so the last resort is what the
+    // element says it is. Every descendant is considered, not only the buttons:
+    // on Shorts the anchor is a wrapper whose only handle is the word it shows.
+    // Those matches are always climbed, because a match picked by its text is
+    // exactly the one that is likely to be nested inside a neighbour.
+    const patterns = layout.anchorPatterns || [];
+    if (patterns.length) {
+      for (const node of container.querySelectorAll("*")) {
+        const label = `${node.getAttribute("aria-label") || ""} ${
+          node.textContent || ""
         }`;
-        if (layout.anchorText.test(label)) return child;
+        if (patterns.some((pattern) => pattern.test(label))) {
+          return rowChildOf(container, node);
+        }
       }
     }
     return null;
@@ -397,7 +562,109 @@
     else root.classList.remove(READY_CLASS);
   }
 
-  function buildButton(layout) {
+  // What the button beside ours is made of: the classes that give it its shape
+  // and colour, and the wrapper classes it puts around its icon and its label.
+  // Taken from the live element rather than written down here, so a restyle on
+  // YouTube's side is inherited instead of having to be matched.
+  function chipOf(anchor) {
+    if (!anchor) return null;
+    const chip = anchor.tagName === "BUTTON" ? anchor : anchor.querySelector("button");
+    if (!chip || !chip.className) return null;
+    const iconWrap = chip.querySelector("svg")?.parentElement;
+    const textWrap = [...chip.children].find(
+      (child) => child !== iconWrap && !child.querySelector("svg")
+    );
+    return {
+      className: String(chip.className),
+      iconClass: iconWrap ? String(iconWrap.className) : "",
+      textClass: textWrap ? String(textWrap.className) : "",
+    };
+  }
+
+  // The button-shaped element inside a row item, when the item wraps one. Used
+  // to measure what the neighbour actually renders, since the wrapper is often
+  // larger than the circle inside it.
+  function chipElement(item) {
+    if (!item) return null;
+    if (item.tagName === "BUTTON") return item;
+    return item.querySelector("button");
+  }
+
+
+  // The word under a neighbour's chip, styled to match it. YouTube's Shorts
+  // labels are a size and a weight of its own choosing, and a guess at either
+  // reads as a mismatch next to "Share" or "1.1M". The label is the innermost
+  // element carrying text: the word itself, not the wrapper around it.
+  function adoptLabel(button, item) {
+    const label = button.querySelector(".ambxst-ytd-button-label");
+    if (!label || !item) return;
+    let word = null;
+    for (const node of item.querySelectorAll("*")) {
+      if (!(node.textContent || "").trim()) continue;
+      if ([...node.children].some((child) => (child.textContent || "").trim())) continue;
+      word = node;
+      break;
+    }
+    if (!word) return;
+    const style = window.getComputedStyle(word);
+    for (const property of ["fontSize", "fontWeight", "lineHeight", "letterSpacing"]) {
+      const value = style[property];
+      if (value) label.style[property] = value;
+    }
+  }
+
+  // The row's own alignment, matched rather than assumed. A box in an inline row
+  // is placed by its baseline, and an inline-block's baseline is its last line
+  // box: ours has none while the label is hidden, so the button sits on its
+  // bottom edge while the chips around it -- whose own text is hidden but still
+  // in flow -- sit on a text baseline a few pixels higher up inside the box.
+  // That is the whole of "slightly higher than the buttons either side of it".
+  //
+  // Which of the two sources of a baseline is right depends on how YouTube builds
+  // its chips, so it is not guessed: both are tried and the one the browser
+  // leaves level is kept. Two states, and every pass re-picks the better of them,
+  // so a restyled bar converges instead of drifting.
+  function lineUpWith(button, neighbour) {
+    if (!neighbour || neighbour === button) return 0;
+    const current = levelWith(button, neighbour);
+    if (Math.abs(current) < 2) return current;
+    button.classList.toggle(LABEL_BASELINE_CLASS);
+    const other = levelWith(button, neighbour);
+    if (Math.abs(other) < Math.abs(current)) return other;
+    // The other source did not help: put back the one that was closer and
+    // re-apply its correction, so the pass ends where it started.
+    button.classList.toggle(LABEL_BASELINE_CLASS);
+    return levelWith(button, neighbour);
+  }
+
+  // What is still off, in px: positive means the button sits above the
+  // neighbour and has to come down. The neighbour's own vertical-align is taken
+  // first, and what is left over is measured away as a vertical-align length --
+  // an axis the row is already aligning on, and one a row that aligns its
+  // children some other way ignores outright, where a margin would go on shoving
+  // the button about. Two passes, because the first gets level and the second
+  // picks up the pixel rounding leaves behind. Every pass re-derives the value
+  // from what the row is doing now, so a stale correction cannot survive a
+  // restyle.
+  function levelWith(button, neighbour) {
+    const align = window.getComputedStyle(neighbour).verticalAlign;
+    if (align && align !== "auto") button.style.verticalAlign = align;
+    for (let pass = 0; pass < 2; pass += 1) {
+      const delta = offsetFrom(button, neighbour);
+      if (!delta || Math.abs(delta) > MAX_ALIGNMENT_SHIFT) return delta;
+      button.style.verticalAlign = `${-delta}px`;
+    }
+    return offsetFrom(button, neighbour);
+  }
+
+  function offsetFrom(button, neighbour) {
+    const theirs = neighbour.getBoundingClientRect();
+    // A row parked out of sight measures 0, which is no signal either way.
+    if (!theirs.height) return 0;
+    return Math.round(theirs.top - button.getBoundingClientRect().top);
+  }
+
+  function buildButton(layout, anchor) {
     const button = document.createElement("button");
     button.id = BUTTON_ID;
     button.type = "button";
@@ -405,8 +672,43 @@
     // pill with the label beside the mark, Shorts wants a round button with the
     // label underneath. The markup is the same either way.
     button.className = `ambxst-ytd-button ambxst-ytd-button--${layout.variant}`;
-    button.innerHTML =
+    let innerHtml =
       `${svgInnerHtml}<span class="ambxst-ytd-button-label">${layout.label}</span>`;
+
+    if (layout.chipFromAnchor) {
+      const chip = chipOf(anchor);
+      if (chip && chip.className) {
+        // --native marks the button as carrying YouTube's own classes, which is
+        // what tells content.css to leave its geometry alone.
+        button.className =
+          `${button.className} ambxst-ytd-button--native ${chip.className}`;
+        // The row decides where this box sits, so it has to be the same kind of
+        // box as the chips around it: an inline-level one, whose baseline is
+        // derived the way theirs is. Imposing our own display instead put the
+        // button's baseline somewhere its neighbours' were not, which read as a
+        // button sitting a few pixels above them. Only a block-level chip is
+        // overridden, because that would take the button off the row entirely.
+        // Said here rather than in the stylesheet: a class on the element wins
+        // there, and the copied one is exactly the class at issue.
+        const neighbour = chipElement(anchor);
+        const display = neighbour
+          ? window.getComputedStyle(neighbour).display
+          : "";
+        button.style.display = INLINE_LEVEL_DISPLAYS.has(display)
+          ? display
+          : "inline-flex";
+        // Mirror the neighbour's inner structure so its stylesheet lays the
+        // label out under the icon for us, rather than our own rule guessing.
+        const icon = chip.iconClass
+          ? `<div class="${chip.iconClass}">${svgInnerHtml}</div>`
+          : svgInnerHtml;
+        const text = `<span class="ambxst-ytd-button-label">${layout.label}</span>`;
+        innerHtml = icon + (chip.textClass ? `<div class="${chip.textClass}">${text}</div>` : text);
+        debugLog(`inherited the neighbouring chip (${chip.className.split(" ")[0]})`);
+      }
+    }
+
+    button.innerHTML = innerHtml;
     button.setAttribute("aria-label", "Download with Ambxst YTD");
     // The pill shows its label; the round variants hide it, so they carry the
     // text as a native tooltip instead (both surfaces show tooltips on hover).
@@ -420,11 +722,80 @@
   // neighbours. Measure a real sibling button and adopt its height and pill
   // radius instead. The CSS default stays in place if nothing can be measured.
   function matchNeighbourMetrics(button) {
-    // Only the pill copies its neighbour's height and radius. A round variant
-    // (Shorts, YT Music) is sized by its own rule in content.css, and copying a
-    // tall action-row neighbour into it would break the shape. The button
-    // carries its own variant, so this needs no extra argument and the resize
-    // and theme listeners can call it without knowing which surface is up.
+    // The round variants are measured against the button next door instead of
+    // trusting a figure written here. A hardcoded 40px in the YT Music bar sat a
+    // few pixels larger than the 36px buttons either side of it and, centred in
+    // the row, read as sitting above them.
+    if (button.classList.contains("ambxst-ytd-button--ytmusic")) {
+      const neighbour = button.previousElementSibling || button.nextElementSibling;
+      if (!neighbour || neighbour.id === BUTTON_ID) return;
+      // The chip inside the shape, not the shape around it. What lines up in the
+      // bar is the button you can see, and that is the box worth copying: a
+      // wrapper carrying padding or a baseline of its own would hand us a
+      // different one, taller or offset, and every measurement after it would
+      // be taken against the wrong edge.
+      const chip = chipElement(neighbour) || neighbour;
+      const box = chip.getBoundingClientRect();
+      const height = Math.round(box.height);
+      // These chips are square, so a measurement that reports no width is still
+      // a usable box.
+      const width = Math.round(box.width) || height;
+      if (height >= MIN_BUTTON_HEIGHT && height <= MAX_BUTTON_HEIGHT && width > 0) {
+        button.style.width = `${width}px`;
+        button.style.height = `${height}px`;
+        button.style.borderRadius = "50%";
+      }
+      const offset = lineUpWith(button, chip);
+      // One line when the numbers change, not one per poll tick: this pass runs
+      // for as long as the button is on the page, and a line every 750ms would
+      // bury anything else in the console. What it says is the whole diagnosis of
+      // a bar that will not sit level -- the two tops, the display the chip is on,
+      // what was applied about it, and which baseline the button ended up on.
+      const report = [
+        `ytmusic: button top ${Math.round(button.getBoundingClientRect().top)}px`,
+        `chip top ${Math.round(chip.getBoundingClientRect().top)}px`,
+        `display ${window.getComputedStyle(chip).display}`,
+        `vertical-align ${button.style.verticalAlign || "-"}`,
+        `offset ${offset}px`,
+        `baseline ${
+          button.classList.contains(LABEL_BASELINE_CLASS) ? "label" : "bottom"
+        }`,
+      ].join(", ");
+      if (report !== lastMetricsReport) {
+        lastMetricsReport = report;
+        debugLog(report);
+      }
+      return;
+    }
+
+    // The Shorts circle is the neighbour's chip, so both sizes are taken from
+    // it: the box that becomes our circle and the icon inside it. The chip has
+    // to be a real <button>; when the circle belongs to a wrapper instead, the
+    // measurement would be of the wrapper plus the label, so it is skipped and
+    // the CSS default stands.
+    if (button.classList.contains("ambxst-ytd-button--reel")) {
+      const item = button.previousElementSibling || button.nextElementSibling;
+      if (!item || item.id === BUTTON_ID) return;
+      const chip = chipElement(item);
+      if (!chip) return;
+      const box = Math.round(chip.getBoundingClientRect().height);
+      const glyph = (() => {
+        const icon = chip.querySelector("svg");
+        return icon ? Math.round(icon.getBoundingClientRect().height) : 0;
+      })();
+      // The chip is a square of the neighbour's size with the mark inside it, so
+      // a mark that is not itself square (this one is 11:16) cannot stretch the
+      // circle into an ellipse. The padding that leaves the mark centred is
+      // worked out in content.css from these two.
+      if (box >= 24 && box <= 96 && glyph >= 12 && glyph <= 48) {
+        button.style.setProperty("--ambxst-chip-size", `${box}px`);
+        button.style.setProperty("--ambxst-glyph-height", `${glyph}px`);
+      }
+      adoptLabel(button, item);
+      return;
+    }
+
+    // Only the pill copies its neighbour's height and radius.
     if (!button.classList.contains("ambxst-ytd-button--pill")) return;
     // Measure around the button itself rather than by searching the document
     // again: the container we were injected into is the only one whose children
@@ -491,6 +862,10 @@
     if (button) {
       if (placementIsValid(button, layout)) {
         markReady(!!layout.hideOwn);
+        // Re-measured on the way past, which is what keeps the button in step
+        // with a row that changed its metrics after we last looked: a late font,
+        // a restyled bar, a track change that rebuilt it.
+        matchNeighbourMetrics(button);
         return true;
       }
       debugLog(`download button is outside the ${layout.name} container on screen`);
@@ -500,21 +875,43 @@
     return injectButton(layout);
   }
 
-  function injectButton(layout) {
-    const container = findContainer(layout);
-    if (!container) return false;
+  // Measuring once, at injection, catches a row that is already laid out and
+  // misses one that is not: YouTube's font arrives after the first paint and
+  // every baseline in the bar moves with it, so a correction taken before then is
+  // a correction to a layout that no longer exists. Hence the repeat once the
+  // frame is on screen and once the fonts are in -- and, as the general net for
+  // anything else that changes the row later (a restyled bar, a track change that
+  // rebuilds it), on the poll.
+  function measureWhenSettled(button) {
+    matchNeighbourMetrics(button);
+    if (settleFrame) window.cancelAnimationFrame(settleFrame);
+    settleFrame = window.requestAnimationFrame(() => {
+      settleFrame = 0;
+      if (button.isConnected) matchNeighbourMetrics(button);
+    });
+    const fonts = document.fonts;
+    if (fonts && fonts.ready && typeof fonts.ready.then === "function") {
+      fonts.ready.then(() => {
+        if (button.isConnected) matchNeighbourMetrics(button);
+      });
+    }
+  }
 
+  function injectButton(layout) {
+    const target = resolveTarget(layout);
+    if (!target) return false;
+    const container = target.container;
     // The anchor is the neighbour the button belongs beside: the like/dislike
     // pair on the watch page, the share button on Shorts, the dislike button in
     // the YT Music bar. It is not guaranteed to exist -- these are view models
     // YouTube has renamed before, and every surface does without some of them --
     // so falling back to the end of the container keeps the button injectable
     // rather than failing forever on a missing anchor.
-    const anchor = findAnchor(container, layout);
-    const button = buildButton(layout);
+    const anchor = target.anchor;
+    const button = buildButton(layout, anchor);
     if (anchor) anchor.insertAdjacentElement("afterend", button);
     else container.appendChild(button);
-    matchNeighbourMetrics(button);
+    measureWhenSettled(button);
     markReady(!!layout.hideOwn);
     debugLog(`injected download button (${layout.name})`);
     return true;
@@ -853,6 +1250,7 @@
   // row grows and shrinks with the viewport, so the measurement has to be
   // repeated. Coalesced into one frame per resize burst.
   let resizeFrame = 0;
+  let settleFrame = 0;
   window.addEventListener(
     "resize",
     () => {
