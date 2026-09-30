@@ -60,8 +60,8 @@
   const THEME_PROBES = ["html", "ytd-app", "#content"];
   let lastThemeIsDark = true;
 
-  function themeIsDark() {
-    for (const selector of THEME_PROBES) {
+  function themeIsDark(probes) {
+    for (const selector of probes && probes.length ? probes : THEME_PROBES) {
       const node = selector === "html" ? document.documentElement : document.querySelector(selector);
       if (!node) continue;
       const color = window.getComputedStyle(node).backgroundColor || "";
@@ -86,7 +86,11 @@
 
   function syncTheme() {
     const root = document.documentElement;
-    const isDark = themeIsDark();
+    // Each surface paints its background somewhere different (YouTube on
+    // ytd-app/#content, YT Music on the player bar), so the probe list comes from
+    // the layout rather than being fixed.
+    const layout = activeLayout();
+    const isDark = themeIsDark(layout && layout.themeProbes);
     lastThemeIsDark = isDark;
     for (const attr of THEME_ATTRS) root.removeAttribute(attr);
     root.setAttribute(isDark ? "darky" : "lighty", "");
@@ -104,27 +108,27 @@
   //   name        used in the debug log
   //   matches()   whether the button belongs on the page at all
   //   containers  candidate parents, best first
-  //   anchor      selector for the node the button follows, or null to append
+  //   anchors     candidates for the node the button follows, best first; an
+  //               empty list appends to the end of the container
+  //   anchorText  last-resort match against a child's aria-label/text, for rows
+  //               built from anonymous custom elements that carry no ids
   //   variant     suffix of the .ambxst-ytd-button--* class content.css styles
-  //   label       text shown with the mark
+  //   label       text shown with the mark, and the tooltip where it is hidden
   //   hideOwn     whether YouTube's own download button should be hidden
+  //   viewport    the surface keeps extra containers loaded off screen, so only
+  //               the one intersecting the viewport counts (Shorts reels)
+  //   themeProbes where that surface paints its background
   //   pageUrl()   the URL the download request is built from
   const WATCH_LAYOUT = {
     name: "watch",
     // /clip/ is a trimmed video and carries the same action row. The hostname
     // guard is what keeps music.youtube.com out: it serves /watch URLs too, with
-    // a completely different DOM.
-    //
-    // /shorts/ is still inside this gate because it is what shipped, but its
-    // overlay is a different DOM that these containers do not describe, so on a
-    // Short this matches and then finds nothing.
+    // a different DOM (see YTMUSIC_LAYOUT below).
     matches() {
       const path = window.location.pathname;
       return (
         window.location.hostname === "www.youtube.com" &&
-        (path.startsWith("/watch") ||
-          path.startsWith("/clip") ||
-          path.startsWith("/shorts/"))
+        (path.startsWith("/watch") || path.startsWith("/clip"))
       );
     },
     containers: [
@@ -133,16 +137,103 @@
       "ytd-watch-metadata #actions",
       "#actions",
     ],
-    anchor: "segmented-like-dislike-button-view-model",
+    anchors: ["segmented-like-dislike-button-view-model"],
     variant: "pill",
     label: "Download",
     hideOwn: true,
+    themeProbes: ["html", "ytd-app", "#content"],
     // The page URL is the video for this surface; a surface whose player
     // outlives the URL (YT Music) resolves it from the player instead.
     pageUrl: () => window.location.href,
   };
 
-  const LAYOUTS = [WATCH_LAYOUT];
+  // Shorts. The button goes in the round action column, under the share button,
+  // which is what the round variant in content.css is styled for.
+  //
+  // The containers are the shapes current userscripts reach this overlay
+  // through rather than a single selector: YouTube has moved this DOM more than
+  // once, and the reels either side of the one being watched are all present in
+  // the page. That is what the [is-active] candidates and the viewport flag are
+  // for; anything they miss is caught by the container search and, failing that,
+  // by the poll, which is the only place a button in the wrong reel gets moved.
+  const SHORTS_LAYOUT = {
+    name: "shorts",
+    matches() {
+      return (
+        window.location.hostname === "www.youtube.com" &&
+        window.location.pathname.startsWith("/shorts/")
+      );
+    },
+    containers: [
+      "ytd-reel-video-renderer[is-active] ytd-reel-player-overlay-renderer #actions",
+      "ytd-reel-video-renderer[is-active] #actions",
+      "ytd-reel-video-renderer[active] #actions",
+      "ytd-reel-player-overlay-renderer #actions",
+      "ytd-shorts #actions",
+      "#shorts-container #actions",
+      "#actions",
+    ],
+    anchors: ["#share-button", "[aria-label=Share]", "[aria-label^=Share]"],
+    anchorText: /share/i,
+    variant: "reel",
+    label: "Download",
+    // The column has no download button of its own, so there is nothing of
+    // YouTube's to hide and nothing to hand back when ours is missing.
+    hideOwn: false,
+    viewport: true,
+    themeProbes: ["html", "ytd-app"],
+    pageUrl: () => window.location.href,
+  };
+
+  // YT Music. The player bar outlives the URL -- a track keeps playing while the
+  // user browses /library -- so this surface is gated on the bar existing rather
+  // than on the page, and the URL comes from the bar's own title link.
+  //
+  // The button goes immediately right of Dislike, a sibling inside the
+  // like/dislike renderer, which is the cluster it belongs to. Every candidate is
+  // resolved *inside* the container, so the like buttons YT Music renders on each
+  // playlist row cannot be mistaken for the player bar's.
+  const YTMUSIC_LAYOUT = {
+    name: "ytmusic",
+    matches() {
+      return (
+        window.location.hostname === "music.youtube.com" &&
+        !!document.querySelector("ytmusic-player-bar")
+      );
+    },
+    containers: [
+      "ytmusic-player-bar #right-controls",
+      "ytmusic-player-bar .right-controls-buttons",
+      "ytmusic-player-bar ytmusic-like-button-renderer",
+      "ytmusic-player-bar",
+    ],
+    anchors: [
+      "#button-shape-dislike",
+      "ytmusic-like-button-renderer #button-shape-dislike",
+      "ytmusic-like-button-renderer",
+    ],
+    variant: "ytmusic",
+    label: "Download",
+    hideOwn: false,
+    themeProbes: ["html", "ytmusic-app", "ytmusic-player-bar"],
+    pageUrl() {
+      // The bar's own link is the playing track; location.href is wherever the
+      // user happens to be browsing.
+      const link = document.querySelector(
+        "ytmusic-player-bar a.title[href], ytmusic-player-bar a[href*=watch]"
+      );
+      const href = link && link.getAttribute("href");
+      if (!href) return window.location.href;
+      try {
+        // The href in the bar is relative.
+        return new URL(href, window.location.origin).href;
+      } catch (error) {
+        return window.location.href;
+      }
+    },
+  };
+
+  const LAYOUTS = [SHORTS_LAYOUT, WATCH_LAYOUT, YTMUSIC_LAYOUT];
 
   // The first layout that applies to the page on screen, or null when the button
   // has no business here at all. A layout that throws while matching is skipped
@@ -191,47 +282,99 @@
     return rect.width > 0 && rect.height > 0;
   }
 
+  // A container the user is actually looking at. Rendered is not always enough:
+  // Shorts keeps the neighbouring reels loaded, so on that surface the box also
+  // has to intersect the viewport before the container counts as the live one.
+  function isUsableContainer(node, layout) {
+    if (!isRendered(node)) return false;
+    if (layout.viewport && !isInViewport(node)) return false;
+    return true;
+  }
+
+  function isInViewport(node) {
+    const rect = node.getBoundingClientRect();
+    if (!rect.width && !rect.height) return false;
+    const viewportHeight = window.innerHeight || 0;
+    const viewportWidth = window.innerWidth || 0;
+    return (
+      rect.bottom > 0 &&
+      rect.top < viewportHeight &&
+      rect.right > 0 &&
+      rect.left < viewportWidth
+    );
+  }
+
   // One layout's container to inject into. More than one candidate can be on the
   // page at the same time: YouTube keeps an alternate action row around for the
-  // compact layout and for player-state swaps, and a row that is no longer the
-  // one on screen is useless to us. Every match is therefore considered, and a
-  // row that is actually rendered wins over one that is not. When no row is
-  // rendered at all YouTube itself is hiding the action area (miniplayer,
-  // theater transitions) and the first match is the right answer anyway.
+  // compact layout and for player-state swaps, and a container that is no longer
+  // the one on screen is useless to us. Every match is therefore considered, and
+  // one that passes isUsableContainer wins over one that does not. When nothing
+  // passes, YouTube itself is hiding the action area (miniplayer, theater
+  // transitions, a swipe between reels) and the first match is the right answer
+  // anyway: the button goes in, and the poll moves it once the row settles.
+  //
+  // Called only when the button has to be placed, never from the mutation hot
+  // path, so the layout reads below are paid for a handful of times a session.
   function findContainer(layout) {
     let first = null;
+    let firstUsable = null;
     for (const selector of layout.containers) {
       for (const node of document.querySelectorAll(selector)) {
         if (first === null) first = node;
-        if (isRendered(node)) return node;
-      }
-    }
-    return first;
-  }
-
-  // Is the button sitting in a row that is still live? Being connected is not
-  // enough: the button survives a layout change that moved the row the user sees
-  // somewhere else, and the watchdog would then report success forever while the
-  // user looks at an action row with no download button in it.
-  //
-  // A hidden row only counts as stale when some *other* row is the visible one.
-  // When YouTube hides every row the placement is right and the button comes
-  // back with the row.
-  function placementIsValid(button, layout) {
-    let buttonInHiddenRow = false;
-    let someRowVisible = false;
-    for (const selector of layout.containers) {
-      for (const node of document.querySelectorAll(selector)) {
-        const rendered = isRendered(node);
-        if (node.contains(button)) {
-          if (rendered) return true;
-          buttonInHiddenRow = true;
-        } else if (rendered) {
-          someRowVisible = true;
+        if (firstUsable === null && isUsableContainer(node, layout)) {
+          firstUsable = node;
         }
       }
     }
-    return buttonInHiddenRow && !someRowVisible;
+    return firstUsable || first;
+  }
+
+  // Is the button sitting in a container that is still live? Being connected is
+  // not enough: the button survives a layout change that moved the container the
+  // user sees somewhere else (to another reel, to a row YouTube parked off
+  // screen), and the watchdog would then report success forever while the user
+  // looks at a row with no download button in it.
+  //
+  // A container that fails the test only counts as stale when some *other* one
+  // passes it. When YouTube hides the whole area the placement is right and the
+  // button comes back with it.
+  function placementIsValid(button, layout) {
+    let buttonInStaleContainer = false;
+    let someContainerUsable = false;
+    for (const selector of layout.containers) {
+      for (const node of document.querySelectorAll(selector)) {
+        const usable = isUsableContainer(node, layout);
+        if (node.contains(button)) {
+          if (usable) return true;
+          buttonInStaleContainer = true;
+        } else if (usable) {
+          someContainerUsable = true;
+        }
+      }
+    }
+    return buttonInStaleContainer && !someContainerUsable;
+  }
+
+  // The node the button belongs beside, resolved *inside* the layout's
+  // container so that an identical element elsewhere on the page -- another
+  // reel's share button, a playlist row's dislike button -- cannot be picked up
+  // by mistake.
+  function findAnchor(container, layout) {
+    for (const selector of layout.anchors || []) {
+      const node = container.querySelector(selector);
+      if (node) return node;
+    }
+    // Last resort: these rows are built from anonymous custom elements, so the
+    // only handle left is what the button says it is.
+    if (layout.anchorText) {
+      for (const child of container.children) {
+        const label = `${child.getAttribute("aria-label") || ""} ${
+          child.textContent || ""
+        }`;
+        if (layout.anchorText.test(label)) return child;
+      }
+    }
+    return null;
   }
 
   // The button is only considered present when it is both findable and still
@@ -265,6 +408,9 @@
     button.innerHTML =
       `${svgInnerHtml}<span class="ambxst-ytd-button-label">${layout.label}</span>`;
     button.setAttribute("aria-label", "Download with Ambxst YTD");
+    // The pill shows its label; the round variants hide it, so they carry the
+    // text as a native tooltip instead (both surfaces show tooltips on hover).
+    if (layout.variant !== "pill") button.title = layout.label;
     button.addEventListener("click", onButtonClick);
     return button;
   }
@@ -358,12 +504,13 @@
     const container = findContainer(layout);
     if (!container) return false;
 
-    // The anchor is the neighbour the button belongs beside -- the like/dislike
-    // pair, on the watch page. It is not guaranteed to exist: that is a view
-    // model YouTube has renamed before, and other surfaces do not render it at
-    // all. Falling back to the end of the container keeps the button injectable
-    // instead of failing forever on a missing anchor.
-    const anchor = layout.anchor ? container.querySelector(layout.anchor) : null;
+    // The anchor is the neighbour the button belongs beside: the like/dislike
+    // pair on the watch page, the share button on Shorts, the dislike button in
+    // the YT Music bar. It is not guaranteed to exist -- these are view models
+    // YouTube has renamed before, and every surface does without some of them --
+    // so falling back to the end of the container keeps the button injectable
+    // rather than failing forever on a missing anchor.
+    const anchor = findAnchor(container, layout);
     const button = buildButton(layout);
     if (anchor) anchor.insertAdjacentElement("afterend", button);
     else container.appendChild(button);

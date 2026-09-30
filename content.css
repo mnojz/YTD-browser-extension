@@ -272,9 +272,35 @@ html[lighty] #ambxst-ytd-popup-close-button:hover {
  * The custom arrow glyph is the project logo and is kept as-is.
  */
 
+/* Everything the variants share. Geometry, colour and the size of the mark are
+ * variant-specific and live in the .ambxst-ytd-button--* blocks below: the pill
+ * beside the like/dislike pair on a watch page, the round Shorts button with its
+ * label underneath, and the icon-only button in the YT Music player bar. */
 .ambxst-ytd-button {
   display: inline-flex;
   align-items: center;
+  box-sizing: border-box;
+  flex: 0 0 auto;
+  border: none;
+  font-family: "Roboto", "Arial", sans-serif;
+  font-size: 14px;
+  font-weight: 500;
+  letter-spacing: 0.2px;
+  cursor: pointer;
+  white-space: nowrap;
+  transition:
+    background-color 0.15s ease,
+    box-shadow 0.15s ease,
+    opacity 0.15s ease;
+}
+
+/* The project mark inherits the label colour, so it follows the theme. */
+.ambxst-ytd-button svg {
+  flex: none;
+}
+
+/* Watch page: a pill matching the buttons either side of it. */
+.ambxst-ytd-button--pill {
   gap: 8px;
   /* Fallback geometry. content.js measures a neighbouring YouTube button and
    * overrides these inline, so the button keeps matching YouTube when its own
@@ -282,34 +308,19 @@ html[lighty] #ambxst-ytd-popup-close-button:hover {
   height: 36px;
   margin: 0 4px;
   padding: 0 16px;
-  border: none;
   border-radius: 18px;
-  box-sizing: border-box;
-  flex: 0 0 auto;
-  font-family: "Roboto", "Arial", sans-serif;
-  font-size: 14px;
-  font-weight: 500;
   line-height: 20px;
-  letter-spacing: 0.2px;
-  cursor: pointer;
-  white-space: nowrap;
   vertical-align: top;
-  transition:
-    background-color 0.15s ease,
-    box-shadow 0.15s ease,
-    opacity 0.15s ease;
 }
 
-/* The project mark inherits the label colour so it follows the theme. */
-.ambxst-ytd-button svg {
-  flex: none;
+.ambxst-ytd-button--pill svg {
   width: auto;
   height: var(--ambxst-glyph-height, 16px);
 }
 
 /* Dark theme: a light 10% layer, a top highlight, and a darker base so the
  * button reads as slightly raised. */
-html[darky] .ambxst-ytd-button {
+html[darky] .ambxst-ytd-button--pill {
   color: #f1f1f1;
   background-color: rgba(255, 255, 255, 0.1);
   background-image: linear-gradient(
@@ -322,11 +333,11 @@ html[darky] .ambxst-ytd-button {
     0 1px 2px rgba(0, 0, 0, 0.2);
 }
 
-html[darky] .ambxst-ytd-button:hover {
+html[darky] .ambxst-ytd-button--pill:hover {
   background-color: rgba(255, 255, 255, 0.16);
 }
 
-html[darky] .ambxst-ytd-button:active {
+html[darky] .ambxst-ytd-button--pill:active {
   background-color: rgba(255, 255, 255, 0.2);
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.1);
 }
@@ -335,7 +346,7 @@ html[darky] .ambxst-ytd-button:active {
  * the top edge invisible and the button appears to fade into the background.
  * The cue has to go the other way here: a slightly darker top edge, mirroring
  * the dark theme's highlight in the opposite direction. */
-html[lighty] .ambxst-ytd-button {
+html[lighty] .ambxst-ytd-button--pill {
   color: #0f0f0f;
   background-color: rgba(0, 0, 0, 0.05);
   background-image: linear-gradient(
@@ -348,14 +359,92 @@ html[lighty] .ambxst-ytd-button {
     0 1px 2px rgba(0, 0, 0, 0.08);
 }
 
-html[lighty] .ambxst-ytd-button:hover {
+html[lighty] .ambxst-ytd-button--pill:hover {
   background-color: rgba(0, 0, 0, 0.1);
 }
 
-html[lighty] .ambxst-ytd-button:active {
+html[lighty] .ambxst-ytd-button--pill:active {
   background-color: rgba(0, 0, 0, 0.14);
   /* Pressed state flattens the edge, the same way the dark theme softens it. */
   box-shadow: inset 0 1px 0 rgba(0, 0, 0, 0.04);
+}
+
+/* Shorts: the round action button with its label underneath, matching the
+ * like / dislike / comments / share column it sits in. The circle is the mark's
+ * own box -- content-box padding with a 50% radius -- so the markup stays
+ * identical to the other variants and no wrapper element is needed. The colours
+ * are deliberately not theme-dependent: this column sits over the video, and
+ * YouTube keeps its own Shorts labels white on both themes. */
+.ambxst-ytd-button--reel {
+  flex-direction: column;
+  gap: 6px;
+  margin: 6px 0;
+  padding: 0;
+  background: none;
+  color: #fff;
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.ambxst-ytd-button--reel svg {
+  width: 24px;
+  height: 24px;
+  padding: 12px;
+  box-sizing: content-box;
+  border-radius: 50%;
+  background-color: rgba(255, 255, 255, 0.15);
+}
+
+.ambxst-ytd-button--reel:hover svg {
+  background-color: rgba(255, 255, 255, 0.28);
+}
+
+.ambxst-ytd-button--reel:active svg {
+  background-color: rgba(255, 255, 255, 0.2);
+}
+
+.ambxst-ytd-button--reel .ambxst-ytd-button-label {
+  /* The same shadow YouTube puts under its own Shorts labels, so a bright frame
+   * of video cannot wash the text out. */
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.6);
+}
+
+/* YT Music: an icon-only button in the player bar, sized and coloured like the
+ * like/dislike pair it sits beside. The label is hidden rather than left out, so
+ * the markup stays identical across variants and the tooltip still has text. */
+.ambxst-ytd-button--ytmusic {
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  margin: 0;
+  padding: 0;
+  border-radius: 50%;
+  background-color: transparent;
+}
+
+.ambxst-ytd-button--ytmusic svg {
+  width: 20px;
+  height: 20px;
+}
+
+.ambxst-ytd-button--ytmusic .ambxst-ytd-button-label {
+  display: none;
+}
+
+html[darky] .ambxst-ytd-button--ytmusic {
+  color: #fff;
+}
+
+html[darky] .ambxst-ytd-button--ytmusic:hover {
+  background-color: rgba(255, 255, 255, 0.1);
+}
+
+html[lighty] .ambxst-ytd-button--ytmusic {
+  color: #030303;
+}
+
+html[lighty] .ambxst-ytd-button--ytmusic:hover {
+  background-color: rgba(0, 0, 0, 0.05);
 }
 
 .ambxst-ytd-button:focus-visible {
