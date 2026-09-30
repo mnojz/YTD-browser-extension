@@ -85,8 +85,15 @@
       const node = selector === "html" ? document.documentElement : document.querySelector(selector);
       if (!node) continue;
       const color = window.getComputedStyle(node).backgroundColor || "";
-      const match = /rgba?\((\d+),\s*(\d+),\s*(\d+)/.exec(color);
+      const match = /rgba?\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*(?:,\s*([\d.]+)\s*)?\)/.exec(color);
       if (!match) continue;
+      // A fully transparent background is not black: it means the page is
+      // painted by one of the other probes, and reading it as black pinned the
+      // button to the dark theme on a light page. The alpha channel was never
+      // part of the match, so rgba(0, 0, 0, 0) -- what getComputedStyle
+      // returns for an unpainted background -- decided the theme on its own
+      // and the remaining probes were never reached.
+      if (match[4] !== undefined && Number(match[4]) === 0) continue;
       // 0.2126/0.7152/0.0722 is the Rec. 709 luma weighting; the mid grey of
       // YouTube's two themes is far enough from 128 that a straight average
       // would misclassify the light theme.
@@ -107,12 +114,72 @@
 
   // ------------------------------------------------------------ injection ----
 
-  function findContainer() {
-    for (const selector of CONTAINER_SELECTORS) {
-      const found = document.querySelector(selector);
-      if (found) return found;
+  // Whether the user can actually see a node. This reads layout, so it is kept
+  // off the mutation hot path (the observer runs ensureButton) and is only used
+  // by the slower checks and by the poll.
+  function isRendered(node) {
+    if (typeof node.checkVisibility === "function") {
+      try {
+        // checkVisibilityCSS is what picks up display:none on the node itself or
+        // on any ancestor, which is exactly what "YouTube parked this row out of
+        // sight" looks like. Opacity is deliberately not part of the test: a row
+        // that is fading in is still the row the user is looking at.
+        return node.checkVisibility({ checkVisibilityCSS: true });
+      } catch (error) {
+        // Older engines reject the options bag; the bare call still covers
+        // display:none and visibility:hidden.
+        try {
+          return node.checkVisibility();
+        } catch (ignored) {
+          /* fall through to the rect test below */
+        }
+      }
     }
-    return null;
+    const rect = node.getBoundingClientRect();
+    return rect.width > 0 && rect.height > 0;
+  }
+
+  // The action row to inject into. More than one can be on the page at the same
+  // time: YouTube keeps an alternate row around for the compact layout and for
+  // player-state swaps, and a row that is no longer the one on screen is useless
+  // to us. Every match is therefore considered, and a row that is actually
+  // rendered wins over one that is not. When no row is rendered at all YouTube
+  // itself is hiding the action area (miniplayer, theater transitions) and the
+  // first match is the right answer anyway.
+  function findContainer() {
+    let first = null;
+    for (const selector of CONTAINER_SELECTORS) {
+      for (const node of document.querySelectorAll(selector)) {
+        if (first === null) first = node;
+        if (isRendered(node)) return node;
+      }
+    }
+    return first;
+  }
+
+  // Is the button sitting in a row that is still live? Being connected is not
+  // enough: the button survives a layout change that moved the row the user sees
+  // somewhere else, and the watchdog would then report success forever while the
+  // user looks at an action row with no download button in it.
+  //
+  // A hidden row only counts as stale when some *other* row is the visible one.
+  // When YouTube hides every row the placement is right and the button comes
+  // back with the row.
+  function placementIsValid(button) {
+    let buttonInHiddenRow = false;
+    let someRowVisible = false;
+    for (const selector of CONTAINER_SELECTORS) {
+      for (const node of document.querySelectorAll(selector)) {
+        const rendered = isRendered(node);
+        if (node.contains(button)) {
+          if (rendered) return true;
+          buttonInHiddenRow = true;
+        } else if (rendered) {
+          someRowVisible = true;
+        }
+      }
+    }
+    return buttonInHiddenRow && !someRowVisible;
   }
 
   // The button is only considered present when it is both findable and still
@@ -178,10 +245,11 @@
     button.style.setProperty("--ambxst-glyph-height", `${glyph}px`);
   }
 
-  // Idempotent and cheap: this is the only thing the watchdog runs, and it runs
-  // on every coalesced mutation batch, so the "already there" path must stay a
-  // couple of lookups. Returns true when the button is on the page once the
-  // call has finished, false when there is nothing to attach to yet.
+  // Idempotent and cheap: this is the hot path, run on every coalesced mutation
+  // batch, so "already there" stays one lookup and "not there" stays one insert.
+  // It answers "is our button on the page", not "is it in the right place" --
+  // that is verifyButton, which reads layout and is deliberately kept off this
+  // path.
   function ensureButton() {
     if (!isWatchPage()) {
       removeButton();
@@ -194,7 +262,36 @@
       markReady(true);
       return true;
     }
+    // Nothing of ours on the page. Hand the row back to YouTube's own download
+    // button (content.css hides it only while ours is there) so the action row is
+    // never left empty, and take it over again as soon as the injection below
+    // succeeds. Both happen in this same task, so the swap is never painted.
+    markReady(false);
+    return injectButton();
+  }
 
+  // The slow, thorough check: presence *and* placement. Run on the poll, on
+  // navigation, and when the tab comes back to the foreground, where a layout
+  // read is affordable and the page state has settled.
+  function verifyButton() {
+    if (!isWatchPage()) {
+      removeButton();
+      return false;
+    }
+    const button = existingButton();
+    if (button) {
+      if (placementIsValid(button)) {
+        markReady(true);
+        return true;
+      }
+      debugLog("download button is in a row that is no longer on screen");
+      button.remove();
+    }
+    markReady(false);
+    return injectButton();
+  }
+
+  function injectButton() {
     const container = findContainer();
     if (!container) return false;
 
@@ -221,40 +318,43 @@
   }
 
   // ------------------------------------------------------------- watchdog ----
-
-  // YouTube's watch page is rebuilt, never reloaded, when the video changes: the
-  // action row is destroyed and recreated, and any node injected into it is
-  // destroyed with it. "The button exists" is therefore a snapshot, not a
-  // terminal state, and the observer has to stay armed for as long as a watch
-  // page is on screen.
   //
-  // The previous version did the opposite, and that is what made the button
-  // disappear on the next video. It only armed the observer when the *first*
-  // injection attempt failed, and it disconnected the observer again as soon as
-  // an injection succeeded:
+  // A watch page mutates constantly -- player, comments, ads, recommendations
+  // -- and YouTube throws the whole action row away every time the video
+  // changes. The deterministic version of that bug (an observer that was armed
+  // only on the error path, then disarmed on success) is what the current shape
+  // fixes: the watchdog is armed for as long as a watch page is on screen and
+  // every mechanism funnels into the same idempotent check.
   //
-  //   initial load  -> ensureButton() succeeds -> onNavigate returns early,
-  //                    startObserving() is never reached: nothing is armed.
-  //   video change  -> yt-navigate-finish -> onNavigate -> removeButton() and
-  //                    an immediate re-injection into the row YouTube is about
-  //                    to replace -> YouTube swaps the row and the injected
-  //                    button goes with it -> no observer is left to put it
-  //                    back, so it never comes back.
-  //
-  // Three mechanisms keep the button alive now:
-  //   * the MutationObserver, which repairs the button within a frame of
-  //     YouTube dropping it,
+  // Three mechanisms keep the button alive:
+  //   * the MutationObserver, which repairs the button in the same task that
+  //     YouTube drops it,
   //   * a self-sustaining retry, for a row that appears without producing an
   //     observed mutation,
   //   * a slow poll, as a backstop for a rendering path that mutates nothing
-  //     at all.
-  // All three funnel into the same idempotent ensureButton(), and all three are
-  // disarmed the moment the user leaves the watch page.
+  //     at all, and the only place a button that is present but in the wrong row
+  //     gets moved.
+  // On top of those, the tab becoming visible again forces a check, because a
+  // background tab has its timers throttled and its frames suspended.
   let observer = null; // MutationObserver, armed while a watch page is up
   let retryTimer = null; // backoff retry while the button is missing
   let pollTimer = null; // slow poll, covers mutations that never arrive
-  let pendingFrame = 0; // rAF handle, coalesces a burst of mutations
   let retryDelay = RETRY_MIN_MS;
+
+  // The watchdog is the only thing keeping the button alive, so no single check
+  // may be able to take it down. Anything the page does to us while we are
+  // touching its DOM -- a custom element reacting synchronously, a layout read
+  // on a node that is being torn down -- surfaces here as a caught error and a
+  // retry, instead of an uncaught exception that would kill the retry chain and
+  // leave the button gone until the next navigation.
+  function attempt(check) {
+    try {
+      return check();
+    } catch (error) {
+      debugLog("download button check failed", error);
+      return false;
+    }
+  }
 
   // Short and growing: the row is usually there within a frame or two, and a
   // failed attempt is cheap (an id lookup plus two queries) so the backoff can
@@ -263,26 +363,27 @@
     if (retryTimer !== null) return;
     retryTimer = window.setTimeout(() => {
       retryTimer = null;
-      if (ensureButton()) {
+      if (attempt(ensureButton)) {
         retryDelay = RETRY_MIN_MS;
         return;
       }
       // Re-arm from inside the callback instead of waiting for the next
       // mutation. A page that goes quiet after a failed attempt (a slow
       // connection, a throttled tab, a paused player) produces no further
-      // mutations, and the old one-shot timer gave up at exactly that point.
+      // mutations, and a one-shot timer gives up at exactly that point.
       retryDelay = Math.min(RETRY_MAX_MS, Math.round(retryDelay * 1.6));
       scheduleRetry();
     }, retryDelay);
   }
 
   function onMutations() {
-    if (pendingFrame) return;
-    // Coalesce a burst of mutations into one check per frame.
-    pendingFrame = window.requestAnimationFrame(() => {
-      pendingFrame = 0;
-      if (!ensureButton()) scheduleRetry();
-    });
+    // Deliberately not deferred to requestAnimationFrame any more. The observer
+    // already delivers one callback per batch, so the extra frame bought nothing
+    // and cost two real problems: frames are suspended in a background tab, so a
+    // video changed while the tab was hidden was not repaired until the tab came
+    // back; and the repair lost the race with the paint, so the action row was
+    // visibly empty for a frame on every change (ours removed, YouTube's hidden).
+    if (!attempt(ensureButton)) scheduleRetry();
   }
 
   function onPoll() {
@@ -294,15 +395,22 @@
       removeButton();
       return;
     }
-    // Backstop only. The work is an id lookup, so running it a few times a
-    // second on a page this busy costs nothing measurable.
-    if (!ensureButton()) scheduleRetry();
+    // The thorough check: this is where a button that is present but sitting in
+    // a stale or hidden row is moved. One layout read per tick, which is why it
+    // lives here and not on the mutation path.
+    if (!attempt(verifyButton)) scheduleRetry();
   }
 
   function armWatchdog() {
-    if (!observer && document.body) {
+    // Observed on the document element rather than on body: a page that replaces
+    // its own body would otherwise leave the observer watching a detached tree,
+    // and nothing would ever be seen again.
+    if (!observer && document.documentElement) {
       observer = new MutationObserver(onMutations);
-      observer.observe(document.body, { childList: true, subtree: true });
+      observer.observe(document.documentElement, {
+        childList: true,
+        subtree: true,
+      });
     }
     if (pollTimer === null) pollTimer = window.setInterval(onPoll, POLL_MS);
     // Reset the backoff: a fresh navigation deserves a fast first attempt.
@@ -323,32 +431,58 @@
       window.clearInterval(pollTimer);
       pollTimer = null;
     }
-    if (pendingFrame) {
-      window.cancelAnimationFrame(pendingFrame);
-      pendingFrame = 0;
-    }
     retryDelay = RETRY_MIN_MS;
   }
 
+  // Called when the tab becomes visible again (and when the window regains
+  // focus). Both are events this content script would otherwise never hear, and
+  // both happen right before the user looks at the page -- the worst possible
+  // moment to be missing a button. It is also the catch-all for a navigation
+  // whose event never reached us at all: if no watchdog is armed and this is a
+  // watch page, one is armed here.
+  function onForeground() {
+    if (!isWatchPage()) {
+      removeButton();
+      disarmWatchdog();
+      return;
+    }
+    if (!observer) armWatchdog();
+    attempt(verifyButton);
+  }
+
   // YouTube does not reload the page when moving between videos, so a one-shot
-  // injection at load time would miss every navigation after the first. React
-  // to the app's own navigation event and to history changes.
+  // injection at load time would miss every navigation after the first. React to
+  // the app's own navigation event and to history changes.
   //
   // Whatever happens here, the watchdog is armed afterwards: yt-navigate-finish
   // is not a reliable "the new row is in the DOM" signal. Depending on the
-  // navigation it fires before YouTube has built the new action row, or after
-  // it has already built and will shortly replace it again. Arming
-  // unconditionally is what makes the button survive both orderings.
+  // navigation it fires before YouTube has built the new action row, or after it
+  // has already built and will shortly replace it again. Arming unconditionally
+  // is what makes the button survive both orderings.
   function onNavigate() {
     syncTheme();
-    // Also drops the popup, which is built for the video that is being left.
-    removeButton();
-    disarmWatchdog();
-    if (!isWatchPage()) return;
-    // Best effort first, so a video that is already on screen gets the button
-    // in the same frame rather than a retry later.
-    ensureButton();
-    armWatchdog();
+    // The popup is built for the video that is being left, so it always goes.
+    closePopup();
+    if (!isWatchPage()) {
+      removeButton();
+      disarmWatchdog();
+      return;
+    }
+    // The button itself is deliberately NOT torn down and rebuilt here. It used
+    // to be, which guaranteed a window with no button on every navigation, and
+    // with YouTube's own button hidden by our ready class that window was an
+    // empty action row. The button is tied to no particular video -- it reads
+    // window.location.href when it is clicked -- so the watchdog keeping it in
+    // step with the DOM is all that is needed.
+    try {
+      // Best effort, so a video that is already on screen has the button in the
+      // same task rather than a retry or a poll tick later.
+      attempt(verifyButton);
+    } finally {
+      // Armed even if the check threw: the observer is the only thing that can
+      // repair the button afterwards.
+      armWatchdog();
+    }
   }
 
   // ---------------------------------------------------------------- popup ----
@@ -533,6 +667,13 @@
       if (button) matchNeighbourMetrics(button);
     });
   }
+
+  document.addEventListener("visibilitychange", () => {
+    if (!document.hidden) onForeground();
+  });
+  // focus fires when the window regains focus without the tab ever being
+  // reported as hidden (two windows side by side, for instance).
+  window.addEventListener("focus", onForeground);
 
   syncTheme();
   // YouTube fires this for every in-app navigation, including video changes on

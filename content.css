@@ -371,3 +371,15 @@ html.ambxst-ytd-ready #flexible-item-buttons ytd-download-button-renderer {
   display: none !important;
 }
 
+/* The action row is responsive: YouTube hides and rearranges its children as
+ * the viewport narrows, and the compact layout drops most of the row. Ours is a
+ * plain <button> among view models, so it is pinned visible while it is the
+ * active download control. Without this, a layout change could hide the node
+ * while the watchdog -- which only asks whether the node is on the page -- kept
+ * reporting success, leaving the user with no download button at all. */
+html.ambxst-ytd-ready #top-level-buttons-computed > #ambxst-ytd-download-button,
+html.ambxst-ytd-ready #actions > #ambxst-ytd-download-button {
+  display: inline-flex !important;
+  visibility: visible !important;
+}
+
