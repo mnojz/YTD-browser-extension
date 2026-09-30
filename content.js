@@ -22,14 +22,6 @@
   const POPUP_ID = "ambxst-ytd-popup-bg";
   const FORMAT_NAME = "ambxst-ytd-format";
 
-  const CONTAINER_SELECTORS = [
-    "ytd-watch-metadata #top-level-buttons-computed",
-    "#top-level-buttons-computed",
-    "ytd-watch-metadata #actions",
-    "#actions",
-  ];
-  const ANCHOR_SELECTOR = "segmented-like-dislike-button-view-model";
-
   // Watchdog timings. The first retry is quick because the action row is almost
   // always already there; the ceiling keeps a page that is still rendering from
   // being polled hundreds of times a second.
@@ -51,18 +43,6 @@
 
   function debugLog(...args) {
     console.log("%c[ambxst-ytd]", "color:#3ea6ff;font-weight:bold", ...args);
-  }
-
-  // The pages that show a player and an action row. Shorts are included: they
-  // are single videos with their own like/dislike row, and the URL they put on
-  // the wire is the one the bridge downloads.
-  function isWatchPage() {
-    const path = window.location.pathname;
-    return (
-      path.startsWith("/watch") ||
-      path.startsWith("/shorts/") ||
-      path.startsWith("/clip")
-    );
   }
 
   // ---------------------------------------------------------------- theme ----
@@ -112,6 +92,78 @@
     root.setAttribute(isDark ? "darky" : "lighty", "");
   }
 
+  // --------------------------------------------------------------- layouts ----
+  //
+  // Where the button goes, what it looks like and which URL a click downloads
+  // all depend on which YouTube surface is on screen, so each surface is
+  // described once, here. The watchdog stays surface agnostic: it asks
+  // activeLayout() for a description and then treats every surface the same way.
+  // Adding one is an entry in this table plus its styling in content.css, not
+  // another branch in the injection code.
+  //
+  //   name        used in the debug log
+  //   matches()   whether the button belongs on the page at all
+  //   containers  candidate parents, best first
+  //   anchor      selector for the node the button follows, or null to append
+  //   variant     suffix of the .ambxst-ytd-button--* class content.css styles
+  //   label       text shown with the mark
+  //   hideOwn     whether YouTube's own download button should be hidden
+  //   pageUrl()   the URL the download request is built from
+  const WATCH_LAYOUT = {
+    name: "watch",
+    // /clip/ is a trimmed video and carries the same action row. The hostname
+    // guard is what keeps music.youtube.com out: it serves /watch URLs too, with
+    // a completely different DOM.
+    //
+    // /shorts/ is still inside this gate because it is what shipped, but its
+    // overlay is a different DOM that these containers do not describe, so on a
+    // Short this matches and then finds nothing.
+    matches() {
+      const path = window.location.pathname;
+      return (
+        window.location.hostname === "www.youtube.com" &&
+        (path.startsWith("/watch") ||
+          path.startsWith("/clip") ||
+          path.startsWith("/shorts/"))
+      );
+    },
+    containers: [
+      "ytd-watch-metadata #top-level-buttons-computed",
+      "#top-level-buttons-computed",
+      "ytd-watch-metadata #actions",
+      "#actions",
+    ],
+    anchor: "segmented-like-dislike-button-view-model",
+    variant: "pill",
+    label: "Download",
+    hideOwn: true,
+    // The page URL is the video for this surface; a surface whose player
+    // outlives the URL (YT Music) resolves it from the player instead.
+    pageUrl: () => window.location.href,
+  };
+
+  const LAYOUTS = [WATCH_LAYOUT];
+
+  // The first layout that applies to the page on screen, or null when the button
+  // has no business here at all. A layout that throws while matching is skipped
+  // rather than allowed to take the watchdog down with it.
+  function activeLayout() {
+    for (const layout of LAYOUTS) {
+      try {
+        if (layout.matches()) return layout;
+      } catch (error) {
+        debugLog(`layout ${layout.name} could not be matched`, error);
+      }
+    }
+    return null;
+  }
+
+  // The URL a click should download, as resolved by the surface on screen.
+  function currentPageUrl() {
+    const layout = activeLayout();
+    return layout && layout.pageUrl ? layout.pageUrl() : window.location.href;
+  }
+
   // ------------------------------------------------------------ injection ----
 
   // Whether the user can actually see a node. This reads layout, so it is kept
@@ -139,16 +191,16 @@
     return rect.width > 0 && rect.height > 0;
   }
 
-  // The action row to inject into. More than one can be on the page at the same
-  // time: YouTube keeps an alternate row around for the compact layout and for
-  // player-state swaps, and a row that is no longer the one on screen is useless
-  // to us. Every match is therefore considered, and a row that is actually
-  // rendered wins over one that is not. When no row is rendered at all YouTube
-  // itself is hiding the action area (miniplayer, theater transitions) and the
-  // first match is the right answer anyway.
-  function findContainer() {
+  // One layout's container to inject into. More than one candidate can be on the
+  // page at the same time: YouTube keeps an alternate action row around for the
+  // compact layout and for player-state swaps, and a row that is no longer the
+  // one on screen is useless to us. Every match is therefore considered, and a
+  // row that is actually rendered wins over one that is not. When no row is
+  // rendered at all YouTube itself is hiding the action area (miniplayer,
+  // theater transitions) and the first match is the right answer anyway.
+  function findContainer(layout) {
     let first = null;
-    for (const selector of CONTAINER_SELECTORS) {
+    for (const selector of layout.containers) {
       for (const node of document.querySelectorAll(selector)) {
         if (first === null) first = node;
         if (isRendered(node)) return node;
@@ -165,10 +217,10 @@
   // A hidden row only counts as stale when some *other* row is the visible one.
   // When YouTube hides every row the placement is right and the button comes
   // back with the row.
-  function placementIsValid(button) {
+  function placementIsValid(button, layout) {
     let buttonInHiddenRow = false;
     let someRowVisible = false;
-    for (const selector of CONTAINER_SELECTORS) {
+    for (const selector of layout.containers) {
       for (const node of document.querySelectorAll(selector)) {
         const rendered = isRendered(node);
         if (node.contains(button)) {
@@ -202,13 +254,16 @@
     else root.classList.remove(READY_CLASS);
   }
 
-  function buildButton() {
+  function buildButton(layout) {
     const button = document.createElement("button");
     button.id = BUTTON_ID;
     button.type = "button";
-    button.className = "ambxst-ytd-button";
+    // The variant class is what content.css styles: the watch page wants the
+    // pill with the label beside the mark, Shorts wants a round button with the
+    // label underneath. The markup is the same either way.
+    button.className = `ambxst-ytd-button ambxst-ytd-button--${layout.variant}`;
     button.innerHTML =
-      `${svgInnerHtml}<span class="ambxst-ytd-button-label">Download</span>`;
+      `${svgInnerHtml}<span class="ambxst-ytd-button-label">${layout.label}</span>`;
     button.setAttribute("aria-label", "Download with Ambxst YTD");
     button.addEventListener("click", onButtonClick);
     return button;
@@ -219,10 +274,16 @@
   // neighbours. Measure a real sibling button and adopt its height and pill
   // radius instead. The CSS default stays in place if nothing can be measured.
   function matchNeighbourMetrics(button) {
+    // Only the pill copies its neighbour's height and radius. A round variant
+    // (Shorts, YT Music) is sized by its own rule in content.css, and copying a
+    // tall action-row neighbour into it would break the shape. The button
+    // carries its own variant, so this needs no extra argument and the resize
+    // and theme listeners can call it without knowing which surface is up.
+    if (!button.classList.contains("ambxst-ytd-button--pill")) return;
     // Measure around the button itself rather than by searching the document
     // again: the container we were injected into is the only one whose children
     // are comparable buttons.
-    const container = button.parentElement || findContainer();
+    const container = button.parentElement;
     if (!container) return;
 
     let height = 0;
@@ -251,7 +312,8 @@
   // that is verifyButton, which reads layout and is deliberately kept off this
   // path.
   function ensureButton() {
-    if (!isWatchPage()) {
+    const layout = activeLayout();
+    if (!layout) {
       removeButton();
       return false;
     }
@@ -259,7 +321,7 @@
       // Re-assert the marker class: it is what hides YouTube's own download
       // button, and a theme change or an unrelated script touching <html> can
       // leave the button present but the class gone.
-      markReady(true);
+      markReady(!!layout.hideOwn);
       return true;
     }
     // Nothing of ours on the page. Hand the row back to YouTube's own download
@@ -267,46 +329,47 @@
     // never left empty, and take it over again as soon as the injection below
     // succeeds. Both happen in this same task, so the swap is never painted.
     markReady(false);
-    return injectButton();
+    return injectButton(layout);
   }
 
   // The slow, thorough check: presence *and* placement. Run on the poll, on
   // navigation, and when the tab comes back to the foreground, where a layout
   // read is affordable and the page state has settled.
   function verifyButton() {
-    if (!isWatchPage()) {
+    const layout = activeLayout();
+    if (!layout) {
       removeButton();
       return false;
     }
     const button = existingButton();
     if (button) {
-      if (placementIsValid(button)) {
-        markReady(true);
+      if (placementIsValid(button, layout)) {
+        markReady(!!layout.hideOwn);
         return true;
       }
-      debugLog("download button is in a row that is no longer on screen");
+      debugLog(`download button is outside the ${layout.name} container on screen`);
       button.remove();
     }
     markReady(false);
-    return injectButton();
+    return injectButton(layout);
   }
 
-  function injectButton() {
-    const container = findContainer();
+  function injectButton(layout) {
+    const container = findContainer(layout);
     if (!container) return false;
 
-    // The like/dislike pair is the natural anchor because it is the last
-    // stable element of the row, but it is not guaranteed to exist: it is a
-    // view model that YouTube has renamed before and that absent layouts (and
-    // Shorts) do not always render. Falling back to the end of the row keeps
-    // the button injectable instead of failing forever on a missing anchor.
-    const anchor = container.querySelector(ANCHOR_SELECTOR);
-    const button = buildButton();
+    // The anchor is the neighbour the button belongs beside -- the like/dislike
+    // pair, on the watch page. It is not guaranteed to exist: that is a view
+    // model YouTube has renamed before, and other surfaces do not render it at
+    // all. Falling back to the end of the container keeps the button injectable
+    // instead of failing forever on a missing anchor.
+    const anchor = layout.anchor ? container.querySelector(layout.anchor) : null;
+    const button = buildButton(layout);
     if (anchor) anchor.insertAdjacentElement("afterend", button);
     else container.appendChild(button);
     matchNeighbourMetrics(button);
-    markReady(true);
-    debugLog("injected download button");
+    markReady(!!layout.hideOwn);
+    debugLog(`injected download button (${layout.name})`);
     return true;
   }
 
@@ -390,7 +453,7 @@
     // A page that is no longer a watch page -- a navigation whose event never
     // reached us -- disarms itself here rather than idling on every page the
     // user visits afterwards.
-    if (!isWatchPage()) {
+    if (!activeLayout()) {
       disarmWatchdog();
       removeButton();
       return;
@@ -441,7 +504,7 @@
   // whose event never reached us at all: if no watchdog is armed and this is a
   // watch page, one is armed here.
   function onForeground() {
-    if (!isWatchPage()) {
+    if (!activeLayout()) {
       removeButton();
       disarmWatchdog();
       return;
@@ -463,7 +526,7 @@
     syncTheme();
     // The popup is built for the video that is being left, so it always goes.
     closePopup();
-    if (!isWatchPage()) {
+    if (!activeLayout()) {
       removeButton();
       disarmWatchdog();
       return;
@@ -624,7 +687,7 @@
     if (document.getElementById(POPUP_ID)) return;
     const host = document.body || document.documentElement;
     if (!host) return;
-    host.appendChild(buildPopup(window.location.href));
+    host.appendChild(buildPopup(currentPageUrl()));
   }
 
   // ------------------------------------------------------------------ init ----
